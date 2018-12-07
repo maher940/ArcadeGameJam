@@ -1,0 +1,87 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel main
+
+//Define World Gravity as pointing in the negative Z direction
+#define GRAVITY float3(0.0f, 0.0f, -1.0f)
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float3> Result;
+
+struct MESH_IN
+{
+	float3 Pos : POSITION;
+	float3 Norm : NORMAL;
+	float2 Tex : TEXCOORD;
+	float3 Tan : TANGENT;
+};
+
+sampler2D _gravityMap;
+sampler2D _normalMap;
+sampler2D _albedo;
+
+float3x3 WorldToTangent;
+float4x4 WorldViewProj;
+
+float _gravMapW;
+float _gravMapH;
+
+//compute blood at every texel
+[numthreads(8,8,1)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+	//compute the gravity vector at this texel
+	float3 Gravity = mul(GRAVITY, WorldViewProj);
+	Gravity = mul(Gravity, WorldToTangent);
+	Gravity = normalize(Gravity);
+
+	float blood = 0;
+	float4 grab = (float4)0;
+	float myGrav;
+
+	float4 result = float4(Gravity.xy, 0);
+	float2 uv = float2(id.x / _gravMapW, id.y / _gravMapH);
+	
+	//current
+	grab = tex2D(_gravityMap, uv);
+	myGrav = abs(2 * (grab.x - .5)) + abs(2 * (grab.y - .5));
+	blood = grab.b - myGrav * grab.b;
+
+	//above
+	uv = float2(uv.x, (id.y - 1) / _gravMapH);
+	grab = tex2D(_gravityMap, uv);
+	myGrav = -2 * (grab.y - .5);
+	if (myGrav > 0) blood += myGrav * Grab.b;
+
+	//below
+	uv = float2(uv.x, (id.y + 1) / _gravMapH);
+	grab = tex2D(_gravityMap, uv);
+	myGrav = 2 * (grab.y - .5);
+	if (myGrav > 0) blood += myGrav * Grab.b;
+
+	//left
+	uv = float2((id.x + 1) / _gravMapW, uv.y);
+	grab = tex2D(_gravityMap, uv);
+	myGrav = -2 * (grab.x - .5);
+	if (myGrav > 0) blood += myGrav * Grab.b;
+	
+	//right
+	uv = float2((id.x + 1) / _gravMapW, uv.y);
+	grab = tex2D(_gravityMap, uv);
+	myGrav = 2 * (grab.x - .5);
+	if (myGrav > 0) blood += myGrav * Grab.b;
+
+	float2 bloodDir = (float2)0;
+
+	if (blood > minBloodHeight)
+	{
+		float3 normal = tex2D(_normalMap, uv).rgb;
+		normal = 2 * (normal - .5);
+		bloodDir = normal.xy + gravity.xy;
+		bloodDir = clamp(bloodDir, -1, 1);
+		bloodDir = pow(bloodDir, 3);
+	}
+
+	result = float3((.5 * bloodDir) + .5, blood);
+	Result[id.xy] = result;
+}
